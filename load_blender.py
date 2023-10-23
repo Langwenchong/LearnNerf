@@ -70,7 +70,7 @@ def load_blender_data(basedir, half_res=False, testskip=1):
             poses.append(np.array(frame['transform_matrix']))
         # 归一化
         imgs = (np.array(imgs) / 255.).astype(np.float32)  # keep all 4 channels (RGBA)，4通道 rgba
-        poses = np.array(poses).astype(np.float32)
+        poses = np.array(poses).astype(np.float32) #图片相机坐标系到世界坐标转换的矩阵，其实可以通过colmap计算出相机外参
         # 用于计算train val test的递增值,获取不同数据集的索引数值范围，这里先存储所有数据
         counts.append(counts[-1] + imgs.shape[0])
         all_imgs.append(imgs)
@@ -83,6 +83,7 @@ def load_blender_data(basedir, half_res=False, testskip=1):
 
     H, W = imgs[0].shape[:2]
     # meta使用了上面的局部变量，train test val 这个变量值是相同的，文件中这三个值确实是相同的
+    # 存储的是相机的视角范围即宽高比，可以推出相机的焦距
     camera_angle_x = float(meta['camera_angle_x'])
     # 焦距
     focal = .5 * W / np.tan(.5 * camera_angle_x)
@@ -103,4 +104,5 @@ def load_blender_data(basedir, half_res=False, testskip=1):
             imgs_half_res[i] = cv2.resize(img, (W, H), interpolation=cv2.INTER_AREA)
         imgs = imgs_half_res
 
+    # 返还数据集图片和其c2w矩阵，渲染的角度数组，以及每个图片宽高和相机内参焦距与train val test每个数组的起始索引值
     return imgs, poses, render_poses, [H, W, focal], i_split

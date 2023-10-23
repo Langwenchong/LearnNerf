@@ -60,7 +60,7 @@ def get_embedder(multires, i=0):
         return nn.Identity(), 3
 
     embed_kwargs = {
-        # 拼接xyz
+        # 编码后是否将初始输入也拼接进来，比如对于xyz编码后是60维，如果维True，还会加上xyz本身，因此一个点的输入维度维63维
         'include_input': True,
         'input_dims': 3,
         'max_freq_log2': multires - 1,
@@ -71,7 +71,7 @@ def get_embedder(multires, i=0):
 
     embedder_obj = Embedder(**embed_kwargs)
     embed = lambda x, eo=embedder_obj: eo.embed(x)
-    # 第一个返回值是lamda，给定x，返回其位置编码
+    # 第一个返回值是lamda，给定x，返回其位置编码以及返还的新的编码向量的维度
     return embed, embedder_obj.out_dim
 
 

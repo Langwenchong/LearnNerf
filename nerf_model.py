@@ -57,7 +57,7 @@ class NeRF(nn.Module):
 
             h = self.pts_linears[i](h)
             h = F.relu(h)
-            # 第四层后相加
+            # 第四层后拼接残差
             if i in self.skips:
                 h = torch.cat([input_pts, h], -1)
 

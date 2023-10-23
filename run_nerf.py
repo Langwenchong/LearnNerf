@@ -62,20 +62,24 @@ def run_network(inputs, viewdirs, fn, embed_fn, embeddirs_fn, netchunk=1024 * 64
 
 
 def create_nerf(args):
+    # 注意他不是定义网络，而是将参数进一步解析首先创建粗网络与惊喜网络，之后将网络组合，以及后面训练需要用到的优化器返还，而且要注意他还返还训练开关run_network这个lambda函数！！！
+    # 具体的训练前输入的数据在主循环实现,如从像素点引出射线,采样点设置等
     """Instantiate NeRF's MLP model.
     """
 
+    # 对于点进行位置编码，L=10
     embed_fn, input_ch = get_embedder(args.multires, args.i_embed)
 
     input_ch_views = 0
     embeddirs_fn = None
     if args.use_viewdirs:
+        # 对光线视角Θφ进行编码，L=4
         embeddirs_fn, input_ch_views = get_embedder(args.multires_views, args.i_embed)
 
     # 想要=5生效，首先需要use_viewdirs=False and N_importance>0
     output_ch = 5 if args.N_importance > 0 else 4
     skips = [4]
-    # 粗网络
+    # 创建粗网络
     model = NeRF(D=args.netdepth, W=args.netwidth,
                  input_ch=input_ch, output_ch=output_ch, skips=skips,
                  input_ch_views=input_ch_views, use_viewdirs=args.use_viewdirs).to(device)
@@ -83,14 +87,16 @@ def create_nerf(args):
 
     model_fine = None
     if args.N_importance > 0:
-        # 精细网络
+        # 创建精细网络
         model_fine = NeRF(D=args.netdepth_fine, W=args.netwidth_fine,
                           input_ch=input_ch, output_ch=output_ch, skips=skips,
                           input_ch_views=input_ch_views, use_viewdirs=args.use_viewdirs).to(device)
         # 模型参数
         grad_vars += list(model_fine.parameters())
 
-    # netchunk 是网络中处理的点的batch_size
+    # input是xyz，viewdir是方向向量，network_fn是上面定义的粗网络或者惊喜网络 
+    # 这个run_network才是真正执行粗或者精细网络的过程，而粗网络与网络这个整体的coarse2fine的架构叫做NeRF模型
+    # 这里的run_network之所以还要接受一个netchunk实际上才是真正一次性网络处理的点的个数，由此实现了当光线很多或者采样点过多时代码也会自行进一步切割合理的将数据传入以防显存爆满
     network_query_fn = lambda inputs, viewdirs, network_fn: run_network(inputs, viewdirs, network_fn,
                                                                         embed_fn=embed_fn,
                                                                         embeddirs_fn=embeddirs_fn,
@@ -100,13 +106,14 @@ def create_nerf(args):
     # 优化器
     optimizer = torch.optim.Adam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.999))
 
+    # 开始的轮次
     start = 0
     basedir = args.basedir
     expname = args.expname
 
     ##########################
 
-    # Load checkpoints
+    # Load checkpoints，因此可以中途开始
     if args.ft_path is not None and args.ft_path != 'None':
         ckpts = [args.ft_path]
     else:
@@ -147,7 +154,7 @@ def create_nerf(args):
 
     print(model_fine)
 
-    # NDC only good for LLFF-style forward facing data
+    # NDC only good for LLFF-style forward facing data，标准设备坐标仅适用于前景，对于全景需要参考nerf++或者mip nerf 360
     if args.dataset_type != 'llff' or args.no_ndc:
         print('Not ndc!')
         render_kwargs_train['ndc'] = False
@@ -157,6 +164,7 @@ def create_nerf(args):
     render_kwargs_test['perturb'] = False
     render_kwargs_test['raw_noise_std'] = 0.
 
+    # 将这个模型的训练参数，测试参数，开始的轮次，训练的参数，优化器返还
     return render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer
 
 
@@ -254,11 +262,14 @@ def train():
         print('Loaded blender', images.shape, render_poses.shape, hwf, args.datadir)
         i_train, i_val, i_test = i_split
 
+        # 初始化采样点在空间中的位置，这个near与far需要将物体包裹住，超参数需要合理赋值
         near = 2.
         far = 6.
 
         if args.white_bkgd:
-            # todo 这个是什么操作，为什么白色背景要这样操作
+            # todo 这个是什么操作，为什么白色背景要这样操作，推测是可以防止模型取重建拟合白色背景
+            #  根据Alpha混合的原理，对于每个像素，将RGB通道乘以Alpha通道的值，然后加上（1-Alpha)通道的值，这段代码的作用是将输入的图像进行Alpha混合操作，输出只保留RGB通道，并根据Alpha通道的值进行混合计算
+            # 最终的输出图像将只包含RGB通道，且根据Alpha通道的值进行了混合处理，达到了透明度混合的效果
             images = images[..., :3] * images[..., -1:] + (1. - images[..., -1:])
         else:
             images = images[..., :3]
@@ -296,6 +307,7 @@ def train():
 
     # Cast intrinsics to right types
     H, W, focal = hwf
+    # 高宽之前都是浮点数类型，需要进行量化截断
     H, W = int(H), int(W)
     hwf = [H, W, focal]
 
@@ -311,7 +323,7 @@ def train():
     # --------------------------------------------------------------------------------------------------------
 
     # render the test set instead of render_poses path
-    # 使用测试集的pose，而不是用那个固定生成的render_poses
+    # 使用测试集的pose，而不是用那个固定生成的render_poses(40帧360°视频)
     if args.render_test:
         render_poses = np.array(poses[i_test])
 
@@ -325,12 +337,13 @@ def train():
     basedir = args.basedir
     expname = args.expname
 
+    # 生成日志函数
     create_log_files(basedir, expname, args)
 
     # --------------------------------------------------------------------------------------------------------
 
     # Create nerf model
-    # 创建模型
+    # 创建好整个coarse2fine的NeRF整体模型架构,获得训练测试的参数,起始轮次,优化器,以及训练的开关run_network函数
     render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer = create_nerf(args)
     # 有可能从中间迭代恢复运行的
     global_step = start
@@ -358,7 +371,10 @@ def train():
     N_rand = args.N_rand
 
     use_batching = not args.no_batching
-
+    # 使用的话就是打混图片从中选取1024个训练,也就是并不是所有图片都参与训练,一般合成数据集这样处理
+    # 对于前景等则一般所有图片各取1024个点训练
+    # 注意即使训练的时候也不是对图片的所有点进行训练,这里的use_batching的区别是1024是针对于单个图片还是所有图片
+    # 在真正渲染时都是对某个特定新视角的所有像素进行渲染
     if use_batching:
         # For random ray batching
         print('get rays')  # (img_count,2,400,400,3) 2是 rays_o和rays_d
