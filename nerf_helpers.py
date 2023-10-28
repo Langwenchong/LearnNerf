@@ -109,15 +109,16 @@ def get_rays(H, W, K, c2w):
     j = j.t()
     # [400,400,3]，最终得到每一个相机到像素的方向向量（未必归一化），并且此时是在camera坐标系中
     # 默认z都是-1这样保证方向都是同一个平面，同时在后面与zvals相乘能够保证量化距离，并且这里得到是以摄像机为原点的的相机坐标系下的向量坐标
+    # 这里之所以要除以焦距，是为了得到深度为-1时光线向量的x和y应该是多少，进一步与zvals相乘就可以量化表示任意深度下的逆深度向量了(注意这里只是像平面->相机坐标系) 
     dirs = torch.stack([(i - K[0][2]) / K[0][0], -(j - K[1][2]) / K[1][1], -torch.ones_like(i)], -1)
     # Rotate ray directions from camera frame to the world frame
     # dirs [400,400,3] -> [400,400,1,3]
     # dot product, equals to: [c2w.dot(dir) for dir in dirs]
     # rays_d [400,400,3]
-    # 转为世界坐标系
+    # 转为世界坐标系，但是还没有归一化为单位向量
     rays_d = torch.sum(dirs[..., np.newaxis, :] * c2w[:3, :3], -1)
     # Translate camera frame's origin to the world frame. It is the origin of all rays.
-    # 前三行，最后一列，定义了相机的平移，因此可以得到射线的原点o
+    # 前三行，最后一列，定义了相机的平移(回忆相机外参是[R|t])，因此可以得到射线的原点o其实就是相机在世界坐标系下的坐标
     rays_o = c2w[:3, -1].expand(rays_d.shape)
     return rays_o, rays_d
 

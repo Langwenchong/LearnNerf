@@ -68,7 +68,7 @@ def render(H, W, K,
     rays_d = torch.reshape(rays_d, [-1, 3]).float()
     # [bs,1],[bs,1]
     near, far = near * torch.ones_like(rays_d[..., :1]), far * torch.ones_like(rays_d[..., :1])
-    # 8=3+3+1+1，虽然光线起始点是rays_o，但是最终计算采样点是从near开始沿着rays_o方向延伸到far
+    # 8=3+3+1+1，虽然光线起始点是rays_o，但是最终计算采样点是从near开始沿着rays_d方向延伸到far
     rays = torch.cat([rays_o, rays_d, near, far], -1)
     if use_viewdirs:
         # 加了direction的三个坐标
@@ -193,7 +193,7 @@ def render_rays(ray_batch,
             np.random.seed(0)
             t_rand = np.random.rand(*list(z_vals.shape))
             t_rand = torch.Tensor(t_rand)
-        # [bs,64] 加上随机的噪声，然后使用随机的t进行线性差值得到有噪声的采样点
+        # [bs,64] 加上随机的噪声，然后使用随机的t进行线性差值得到有噪声的采样点，这样就不是均匀采样了但是比均匀采样更加具有鲁棒性
         z_vals = lower + (upper - lower) * t_rand
 
     # 空间中的采样点

@@ -392,6 +392,7 @@ def train():
         i_batch = 0
 
     # 统一一个时刻放入cuda
+    # 同时打印输入
     # Move training data to GPU
     if use_batching:
         images = torch.Tensor(images).to(device)
@@ -425,7 +426,7 @@ def train():
 
             i_batch += N_rand
             if i_batch >= rays_rgb.shape[0]:
-                # 所用光线用过之后，重新打乱
+                # 所有光线用过之后，重新打乱
                 print("Shuffle data after an epoch!")
                 rand_idx = torch.randperm(rays_rgb.shape[0])
                 rays_rgb = rays_rgb[rand_idx]
@@ -439,6 +440,7 @@ def train():
             pose = poses[img_i, :3, :4]
 
             if N_rand is not None:
+                # 这里是先计算出这张照片的所有像素点的逆深度向量
                 rays_o, rays_d = get_rays(H, W, K, torch.Tensor(pose))  # (H, W, 3), (H, W, 3)
 
                 # precrop_iters: number of steps to train on central crops
@@ -467,11 +469,13 @@ def train():
                 select_inds = np.random.choice(coords.shape[0], size=[N_rand], replace=False)  # (N_rand,)
                 # 选出的像素坐标
                 select_coords = coords[select_inds].long()  # (N_rand, 2)
+                # 然后筛选出选中的像素坐标对应的向量起点和方向
+                # 思考：这里起点是不是一定坐标值都一样？没有意义？错，只是对于针对单张图片时起点一定相同，如果是多张图片随机选取这里的起点会各不相同
                 rays_o = rays_o[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
                 rays_d = rays_d[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
                 batch_rays = torch.stack([rays_o, rays_d], 0)  # 堆叠 o和d
                 # target 也同样选出对应位置的点
-                # target 用来最后的mse loss 计算
+                # target 用来最后的mse loss 计算颜色误差
                 target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
 
         #####  Core optimization loop  #####
