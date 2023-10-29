@@ -9,6 +9,8 @@ DEBUG = False
 __all__ = ['render', 'batchify_rays', 'render_rays', 'raw2outputs']
 
 # 传入光线，图片信息，模型信息进行模型的采样点训练与体渲染，但是这个render函数主要是完成光线采样训练前的数据预处理
+
+
 def render(H, W, K,
            chunk=1024 * 32, rays=None, c2w=None, ndc=True,
            near=0., far=1.,
@@ -67,7 +69,9 @@ def render(H, W, K,
     rays_o = torch.reshape(rays_o, [-1, 3]).float()
     rays_d = torch.reshape(rays_d, [-1, 3]).float()
     # [bs,1],[bs,1]
-    near, far = near * torch.ones_like(rays_d[..., :1]), far * torch.ones_like(rays_d[..., :1])
+    near, far = near * \
+        torch.ones_like(rays_d[..., :1]), far * \
+        torch.ones_like(rays_d[..., :1])
     # 8=3+3+1+1，虽然光线起始点是rays_o，但是最终计算采样点是从near开始沿着rays_d方向延伸到far
     rays = torch.cat([rays_o, rays_d, near, far], -1)
     if use_viewdirs:
@@ -92,6 +96,8 @@ def render(H, W, K,
     return ret_list + [ret_dict]
 
 # 如果超过chunk值分批式处理，然后对每一个光线进行采样点训练
+
+
 def batchify_rays(rays_flat, chunk=1024 * 32, **kwargs):
     """
     Render rays in smaller minibatches to avoid OOM.
@@ -110,7 +116,7 @@ def batchify_rays(rays_flat, chunk=1024 * 32, **kwargs):
     return all_ret
 
 
-# 这里面会经过神经网络
+# 这里面会经过神经网络,这里就是将采样光线和对应的模型放到一起准备开始走网络预测每一个像素颜色
 def render_rays(ray_batch,
                 network_fn,
                 network_query_fn,
@@ -168,7 +174,8 @@ def render_rays(ray_batch,
     rays_o, rays_d = ray_batch[:, 0:3], ray_batch[:, 3:6]  # [N_rays, 3] each
     # 视角的单位向量
     viewdirs = ray_batch[:, -3:] if ray_batch.shape[-1] > 8 else None
-    bounds = torch.reshape(ray_batch[..., 6:8], [-1, 1, 2])  # [bs,1,2] near和far
+    bounds = torch.reshape(
+        ray_batch[..., 6:8], [-1, 1, 2])  # [bs,1,2] near和far
     near, far = bounds[..., 0], bounds[..., 1]  # [-1,1]
     # 采样点，先生成等间隔
     t_vals = torch.linspace(0., 1., steps=N_samples)
@@ -193,13 +200,14 @@ def render_rays(ray_batch,
             np.random.seed(0)
             t_rand = np.random.rand(*list(z_vals.shape))
             t_rand = torch.Tensor(t_rand)
-        # [bs,64] 加上随机的噪声，然后使用随机的t进行线性差值得到有噪声的采样点，这样就不是均匀采样了但是比均匀采样更加具有鲁棒性
+        # [bs,64] 加上随机的噪声，然后使用随机的t进行线性插值得到有噪声的采样点，这样就不是均匀采样了但是比均匀采样更加具有鲁棒性
         z_vals = lower + (upper - lower) * t_rand
 
     # 空间中的采样点
     # [N_rand, 64, 3]
     # 出发点+距离*方向，因此rays_d一开始设置的z值为-1，为了方便这里统一进行与距离z_vals的相乘
-    pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None]  # [N_rays, N_samples, 3]
+    pts = rays_o[..., None, :] + rays_d[..., None, :] * \
+        z_vals[..., :, None]  # [N_rays, N_samples, 3]
 
     # 使用神经网络 viewdirs [N_rand,3], network_fn 指的是粗糙NeRF或者精细NeRF
     # raw [bs,64,3]，每一条光线采样点累加得到映射的rgbσ
@@ -217,13 +225,15 @@ def render_rays(ray_batch,
         # 第二次计算mid，取中点位置63个值
         z_vals_mid = .5 * (z_vals[..., 1:] + z_vals[..., :-1])
         # 注意这里的weights并没有全部传进来，这里主要是参考粗网络计算得到的weights得到一个概率分布重新规划128个采样点的分布位置
-        z_samples = sample_pdf(z_vals_mid, weights[..., 1:-1], N_importance, det=(perturb == 0.), pytest=pytest)
+        z_samples = sample_pdf(
+            z_vals_mid, weights[..., 1:-1], N_importance, det=(perturb == 0.), pytest=pytest)
         z_samples = z_samples.detach()
 
         z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
         # 给精细网络使用的点
         # [N_rays, N_samples + N_importance, 3]，这里应该为192个点，之所以加上粗网络的点是为了添加更多参数值，整体上采样点也是较为合理的
-        pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None]
+        pts = rays_o[..., None, :] + \
+            rays_d[..., None, :] * z_vals[..., :, None]
 
         run_fn = network_fn if network_fine is None else network_fine
 
@@ -232,6 +242,7 @@ def render_rays(ray_batch,
         # viewdirs 与粗糙网络是相同的
         raw = network_query_fn(pts, viewdirs, run_fn)
 
+        # raw2ouputs是体渲染函数
         rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, white_bkgd,
                                                                      pytest=pytest)
 
@@ -279,13 +290,15 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=F
         depth_map: [num_rays]. Estimated distance to object.
     """
     # Alpha的计算
-    # relu, 负数拉平为0，raw就是算出来的σ,dists是采样点距离差
-    raw2alpha = lambda raw, dists, act_fn=F.relu: 1. - torch.exp(-act_fn(raw) * dists)
+    # relu：负数拉平为0，raw就是算出来的σ,dists是采样点距离差
+    def raw2alpha(raw, dists, act_fn=F.relu): return 1. - \
+        torch.exp(-act_fn(raw) * dists)
     # [bs,63]
     # 采样点之间的距离，因为加入了噪声因此未必是均匀的等值距离
     dists = z_vals[..., 1:] - z_vals[..., :-1]
     # todo 不知道在干嘛，总之就是对于每一个光线的一组采样点之差后面再拼接一下1e10,这里是为了模拟无限远处，最后一个邻域无限远因此增幅较强，可以认为基本只有距离衰减
-    dists = torch.cat([dists, torch.Tensor([1e10]).expand(dists[..., :1].shape)], -1)  # [N_rays, N_samples]
+    dists = torch.cat([dists, torch.Tensor([1e10]).expand(
+        dists[..., :1].shape)], -1)  # [N_rays, N_samples]
     # rays_d[...,None,:] [bs,3] -> [bs,1,3]
     # 1维 -> 3维
     dists = dists * torch.norm(rays_d[..., None, :], dim=-1)
@@ -318,7 +331,8 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=F
     depth_map = torch.sum(weights * z_vals, -1)
     # 视差图
     # Disparity map is inverse depth.
-    disp_map = 1. / torch.max(1e-10 * torch.ones_like(depth_map), depth_map / torch.sum(weights, -1))
+    disp_map = 1. / torch.max(1e-10 * torch.ones_like(depth_map),
+                              depth_map / torch.sum(weights, -1))
 
     # 权重和
     # 这个值仅做了输出用，后续并无使用
